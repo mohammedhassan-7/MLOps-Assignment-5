@@ -1,0 +1,124 @@
+name: ML Model CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  validate:
+    name: Train & Validate Model
+    runs-on: ubuntu-latest
+    steps:
+
+      # Checkout code
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Python setup
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      # Install dependencies and linter
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install flake8
+
+      # Lint code
+      - name: Lint with flake8
+        run: flake8 .
+
+      # Cache pip
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      # Pull data
+      - name: Pull dataset with DVC
+        env:
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+        run: dvc pull
+
+      # Train model
+      - name: Train model
+        env:
+          MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+        run: python train.py
+
+      # Check artifact
+      - name: Verify model_info.txt exists
+        run: |
+          if [ ! -f model_info.txt ]; then
+            echo "ERROR: model_info.txt not found. Training may have failed."
+            exit 1
+          fi
+          echo "model_info.txt contents: $(cat model_info.txt)"
+
+      # Upload artifact
+      - name: Upload model_info artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: model-info
+          path: model_info.txt
+          retention-days: 7
+
+  deploy:
+    name: Check Threshold & Deploy
+    runs-on: ubuntu-latest
+    needs: validate
+    steps:
+
+      # Checkout code
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Python setup
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      # MLflow client
+      - name: Install MLflow client
+        run: pip install mlflow
+
+      # Download artifact
+      - name: Download model_info artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: model-info
+          path: .
+
+      # Show artifact
+      - name: Show downloaded artifact
+        run: |
+          echo "Run ID: $(cat model_info.txt)"
+
+      # Check accuracy
+      - name: Check accuracy threshold
+        env:
+          MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+        run: python check_threshold.py
+
+      # Mock Docker build
+      - name: Mock Docker Build
+        run: |
+          echo "Building Docker image for Run ID: $(cat model_info.txt)"
+          docker build \
+            --build-arg RUN_ID="$(cat model_info.txt)" \
+            -t realwaste-classifier:$(cat model_info.txt) \
+            .
+          echo "Docker image built successfully."
