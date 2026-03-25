@@ -32,3 +32,5 @@ model_info.txt
 # OS/editor noise
 .DS_Store
 Thumbs.db
+
+gdrive-creds.json

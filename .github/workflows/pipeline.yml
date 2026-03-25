@@ -46,12 +46,18 @@ jobs:
       # dvc pull 
       # Set up Google Drive credentials for DVC
       - name: Write GDrive service account JSON
-        run: echo "${{ secrets.GDRIVE_CREDENTIALS_JSON }}" > .dvc/gdrive-creds.json
+        run: |
+          mkdir -p .dvc
+          printf '%s' '${{ secrets.GDRIVE_CREDENTIALS_JSON }}' > .dvc/gdrive-creds.json
+          chmod 600 .dvc/gdrive-creds.json
+        
+      - name: Verify credentials file
+        run: |
+         echo "File exists: $(ls -la .dvc/gdrive-creds.json)"
+         echo "Valid JSON: $(python -c 'import json; json.load(open(".dvc/gdrive-creds.json")); print("YES")')"
 
       # Pull dataset with DVC from Google Drive
       - name: DVC Pull
-        env:
-          GDRIVE_SERVICE_ACCOUNT_JSON_FILE_PATH: ${{ github.workspace }}/gdrive-creds.json
         run: |
           pip install dvc dvc-gdrive
           dvc pull
